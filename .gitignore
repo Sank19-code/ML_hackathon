@@ -14,3 +14,6 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Generated intermediate data (exceeds GitHub 100MB limit)
+*.parquet
