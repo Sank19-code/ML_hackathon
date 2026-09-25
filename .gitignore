@@ -1,0 +1,16 @@
+# Data
+data/
+
+# Generated outputs (large TSVs, exceed GitHub file limits)
+output/
+
+# Environment / secrets
+.env
+.env.*
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
