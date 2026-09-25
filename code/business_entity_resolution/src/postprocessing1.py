@@ -32,7 +32,7 @@ for value in df["matched_entity_ids"]:
 duplicate_ids = {
     entity_id
     for entity_id, count in id_counts.items()
-    if count > 1
+    if count > 2
 }
 
 print(f"Total unique matched IDs: {len(id_counts):,}")
