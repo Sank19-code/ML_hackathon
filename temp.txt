@@ -1,0 +1,8 @@
+Train + test
+python code/business_entity_resolution/src2/run.py --mode all --train-dir data/new/train --test-dir data/new/test --output-dir output/local --model-path code/business_entity_resolution/src2/models/model2.pkl
+
+Train 
+python code/business_entity_resolution/src2/run.py --mode train --train-dir data/new/train --model-path code/business_entity_resolution/src2/models/model2.pkl
+
+Test
+python code/business_entity_resolution/src2/run.py --mode predict --test-dir data/new/test --output-dir output/local --model-path code/business_entity_resolution/src2/models/model2.pkl
