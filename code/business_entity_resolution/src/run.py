@@ -1,101 +1,83 @@
 #!/usr/bin/env python3
 """
-Business Entity Resolution – CLI entry point.
+Business Entity Resolution - command line entry point.
 
-Usage:
-  # Full run (train + predict):
-  python3 src/run.py --mode all
+  python code/business_entity_resolution/src/run.py --mode all \
+      --train-dir dataset/train --test-dir dataset/test --output-dir output
 
-  # Train only:
-  python3 src/run.py --mode train
-
-  # Predict only (needs existing model.pkl):
-  python3 src/run.py --mode predict
+Modes
+  all       translit -> normalize -> block -> train -> predict -> validate
+  prepare   translit + normalize + block for train and test (features are computed on the fly)
+  train     stage 1 / stage 2 models + threshold tuning (needs `prepare`)
+  predict   score the test set and write output/*.tsv (needs `train`)
+  validate  run the official validator on output/
 """
-
 import argparse
+import json
 import os
 import subprocess
 import sys
+import time
 
-# Make src/ importable whether run as a script or as a module
 _here = os.path.dirname(os.path.abspath(__file__))
 if _here not in sys.path:
     sys.path.insert(0, _here)
 
-from pipeline import run_train, run_predict          # noqa: E402
+import pipeline  # noqa: E402
+
+
+def run_validator(output_dir: str, test_dir: str, validator: str = None) -> int:
+    candidates = [validator] if validator else []
+    candidates += [
+        os.path.join(os.path.dirname(os.path.abspath(test_dir.rstrip("/\\"))), "..", "utils", "validate_submission.py"),
+        os.path.join(_here, "..", "..", "..", "data", "6ab10eb3b23ba_student_resource", "student_resource",
+                     "utils", "validate_submission.py"),
+    ]
+    path = next((os.path.abspath(p) for p in candidates if p and os.path.isfile(p)), None)
+    if path is None:
+        print("validate_submission.py not found - skipping validation (pass --validator)")
+        return 0
+    print(f"\n-- official validator: {path}")
+    return subprocess.run([sys.executable, path,
+                           "--matching", os.path.join(output_dir, "matching_results.tsv"),
+                           "--candidate", os.path.join(output_dir, "candidate_pairs.tsv"),
+                           "--test-dir", test_dir], check=False).returncode
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Business Entity Resolution Pipeline")
-    parser.add_argument("--mode", choices=["all", "train", "predict"], default="all",
-                        help="Pipeline mode (default: all)")
-    parser.add_argument("--train-dir", default="dataset/train",
-                        help="Directory with train_source*.tsv + train_ground_truth.tsv")
-    parser.add_argument("--test-dir", default="dataset/test",
-                        help="Directory with test_source*.tsv")
-    parser.add_argument("--output-dir", default="output",
-                        help="Output directory for TSV files")
-    parser.add_argument("--model-path", default="code/business_entity_resolution/model.pkl",
-                        help="Path to save / load the trained model")
-    parser.add_argument("--max-candidates", type=int, default=20,
-                        help="Max blocking candidates per S1 entity (default: 20)")
-    parser.add_argument("--train-size", type=int, default=80000,
-                        help="Number of S1 entities used for training (default: 80000)")
-    parser.add_argument("--val-size", type=int, default=20000,
-                        help="Number of S1 entities held out for validation (default: 20000)")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description="Business Entity Resolution Pipeline")
+    ap.add_argument("--mode", choices=["all", "prepare", "train", "predict", "validate"], default="all")
+    ap.add_argument("--train-dir", default="dataset/train")
+    ap.add_argument("--test-dir", default="dataset/test")
+    ap.add_argument("--output-dir", default="output")
+    ap.add_argument("--work-dir", default="work", help="cache for normalised data, candidates and scores")
+    ap.add_argument("--model-dir", default=os.path.join(_here, "..", "model"),
+                    help="where models, thresholds and the transliteration dictionary are stored")
+    ap.add_argument("--validator", default=None, help="path to utils/validate_submission.py")
+    ap.add_argument("--n-jobs", type=int, default=pipeline.DEFAULT_CONFIG["n_jobs"])
+    ap.add_argument("--reuse-stage1", action="store_true", help="train: keep the stage-1 model and p1")
+    ap.add_argument("--force", action="store_true", help="recompute cached blocking")
+    args = ap.parse_args()
 
+    cfg = dict(pipeline.DEFAULT_CONFIG, n_jobs=args.n_jobs)
+    ws = pipeline.Workspace(args.work_dir, os.path.abspath(args.model_dir))
+    t0 = time.time()
+
+    if args.mode in ("all", "prepare"):
+        pipeline.stage_translit(ws, args.train_dir)
+        for split, d in (("train", args.train_dir), ("test", args.test_dir)):
+            pipeline.stage_normalize(ws, split, d, cfg["n_jobs"])
+            pipeline.stage_block(ws, split, cfg, force=args.force)
     if args.mode in ("all", "train"):
-        run_train(
-            train_dir=args.train_dir,
-            model_save_path=args.model_path,
-            train_sample_size=args.train_size,
-            val_sample_size=args.val_size,
-            max_candidates=args.max_candidates,
-        )
-
+        summary = pipeline.stage_train(ws, args.train_dir, cfg, reuse_stage1=args.reuse_stage1)
+        with open(os.path.join(ws.model, "train_summary.json"), "w") as f:
+            json.dump(summary, f, indent=1, default=float)
     if args.mode in ("all", "predict"):
-        run_predict(
-            test_dir=args.test_dir,
-            output_dir=args.output_dir,
-            model_path=args.model_path,
-            max_candidates=args.max_candidates,
-        )
-
-        # Auto-validate submission
-        validator = os.path.abspath(
-            os.path.join(
-                _here,
-                "..",
-                "..",
-                "..",
-                "data",
-                "6ab10eb3b23ba_student_resource",
-                "student_resource",
-                "utils",
-                "validate_submission.py",
-            )
-        )
-        if os.path.isfile(validator):
-            print("\n── Running official submission validator ──")
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    validator,
-                    "--matching",
-                    os.path.join(args.output_dir, "matching_results.tsv"),
-                    "--candidate",
-                    os.path.join(args.output_dir, "candidate_pairs.tsv"),
-                    "--test-dir",
-                    args.test_dir,
-                ],
-                check=False,
-            )
-            if result.returncode == 0:
-                print("✓ Submission files PASSED all checks — safe to upload!")
-            else:
-                print("✗ Validator reported issues. Fix before submitting.")
+        pipeline.stage_predict(ws, args.output_dir, cfg)
+    if args.mode in ("all", "predict", "validate"):
+        rc = run_validator(args.output_dir, args.test_dir, args.validator)
+        print("validator:", "PASS" if rc == 0 else f"FAIL (exit {rc})")
+    print(f"total time {time.time() - t0:.0f}s")
 
 
 if __name__ == "__main__":
