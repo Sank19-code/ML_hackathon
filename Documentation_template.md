@@ -10,6 +10,7 @@
 
 We undo the synthetic noise with a rule-based normaliser (transliteration learned from the
 training labels, alias/legal/OCR/domain/state/street canonicalisation), retrieve candidates per
+<<<<<<< HEAD
 country with an exact TF-IDF nearest-neighbour search over blocking keys (98.1 % blocking
 recall at 39-53 candidates per entity, including keys for house numbers clipped by one digit), and
 score pairs with a two-stage LightGBM: stage 1 on 78 pairwise + 6 ambiguity-context features,
@@ -22,6 +23,16 @@ labels (France) goes through one data-driven path whose settings were chosen by
 leave-one-country-out rehearsals (a model trained on one labelled country, scored on the other).
 Features that detect the generator's "sibling" distractor businesses (same name and street, house
 number shifted by a fixed offset) target the main difference between the training and test sets.
+=======
+country with an exact TF-IDF nearest-neighbour search over blocking keys (97.4 % blocking
+recall at ~34 candidates per entity), and score pairs with a two-stage LightGBM: stage 1 on 74
+pairwise + 6 ambiguity-context features, stage 2 adding one-to-one competition and
+cluster-consistency features built from stage-1 scores. A per-entity expected-F0.5 decision on
+top of a one-to-one assignment gives a **held-out macro F0.5 of 0.9829** on the labelled training
+universe (tuning and evaluation on disjoint halves of the Source 1 entities). Features that detect
+the generator's "sibling" distractor businesses (same name and street, house number shifted by a
+fixed offset) target the main difference between the training and test sets.
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 
 ---
 
@@ -56,6 +67,7 @@ replacement by a random alias (the address is then the only signal). Addresses: 
 re-ordering, S2 uses state codes while S3 uses full names or native script (`TN` / `Tamil Nadu`
 / `தமிழ்நாடு`), street types abbreviated (`St/Street`, `Rd/Road`, `R./Rue`, `Bd`, `All.`),
 decorated / mutated house numbers (`#111`, `##906`, `0733`, `3503.`, `61A`, `4-47/16` for
+<<<<<<< HEAD
 `47/16`), house numbers clipped by one digit (`2424` -> `424`, `17177` -> `1717`) or dropped, injected numbers (`H.NO 764 202`, `Door No 86`, `PO BOX 2280`), fillers (`null`,
 `<NULL>`, `N/A`), city aliases (Bombay/Mumbai, Poona/Pune, St-Nazaire) and ~3 % empty addresses.
 
@@ -65,6 +77,13 @@ noise drops the region from 35 % of the French Source 2/3 addresses (the address
 city) against 3 % in the US and India; the pair features fill a missing region from a
 locality -> region table learned from the country's own records (97 % coverage afterwards, no
 gazetteer), so `state_match` means the same thing in every country.
+=======
+`47/16`), injected numbers (`H.NO 764 202`, `Door No 86`, `PO BOX 2280`), fillers (`null`,
+`<NULL>`, `N/A`), city aliases (Bombay/Mumbai, Poona/Pune, St-Nazaire) and ~3 % empty addresses.
+
+The test set has a third country (France, 15 % of test Source 1) with no labels, French street
+types, and regions and departments used interchangeably (Gironde -> Nouvelle-Aquitaine).
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 
 ### 2.2 Solution Strategy
 
@@ -91,6 +110,7 @@ country (exact search, numba parallel inverted-index accumulation, ~10 min for 1
     key of the brief - postcodes are nearly absent here), house number + locality word, compound
     ids (`D-12` -> `d12`, `22/235`), consecutive number pairs (`47_16`), street words, locality
     words, numbers; house keys use the first two numbers because noise injects numbers in front;
+<<<<<<< HEAD
     house number with its first or last digit dropped + street word (the noise clips numbers:
     `2424 Peach Ave` -> `424 Peach Ave`; crossed so that only an exact number on one side meets a
     clipped variant on the other), street word + locality word (records whose number was dropped);
@@ -119,27 +139,57 @@ country (exact search, numba parallel inverted-index accumulation, ~10 min for 1
   addresses differ). Remaining misses: empty-address records whose repeated name matches dozens of
   entities (a third of them), renamed businesses with empty or fragmentary addresses (India),
   aliases with mutated numbers.
+=======
+  - *character block:* 3-grams of the core name (typos, scrambles, glued words).
+- **Ranking instead of cutting:** three top-k lists from one pass - combined
+  0.40 name + 0.45 address + 0.15 char cosine (top 25), name+char (top 10, catches records with
+  missing or changed addresses), address only (top 15, catches records renamed to an alias) - are
+  unioned (at most 50 per entity) and ranked by the combined cosine. Only features with
+  df > 5 000 (words) / 2 000 (3-grams) are left out of the index (they carry almost no IDF
+  weight and dominate the cost).
+- **Candidate pairs generated:** train 75.4 M (India 31.0 M, US 44.4 M; 34 per entity);
+  test 58.9 M (India 28.3 M, US 22.2 M, France 8.5 M; 33-35 per entity). `candidate_pairs.tsv`
+  holds exactly the pairs the models score.
+- **Blocking recall (train, all 7.64 M true pairs):** India 97.25 % of pairs / 97.3 % per
+  entity, US 97.4 % / 97.5 %. Separately normalising the name and address blocks was worth +2
+  points, second house-number and number-pair keys +1.8 points, a deeper address-only list +0.15.
+- **How true matches were kept:** measured recall after every change; remaining misses are mostly
+  empty-address records whose (repeated) name matches dozens of entities, and aliases with
+  mutated numbers.
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 
 ---
 
 ## 4. Matching Model
 
+<<<<<<< HEAD
 **Features used (78 pair features + 6 context features; stage 2 adds 25 group features):**
+=======
+**Features used (74 pair features + 6 context features; stage 2 adds 20 group features):**
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 - Name features: ratio, token sort / set, partial ratio and Jaro-Winkler on the core name;
   ratios on the full cleaned name (keeps "services", "trading", legal forms) and on the raw name;
   compact-string ratios and cross partial ratios for domain / glued names; acronym prefix match
   (`jiprivate.com`); alias comparison; IDF cosine and IDF-weighted containment of name tokens in
   both directions; character 3-gram TF-IDF cosine / containment; token counts, first/last token
+<<<<<<< HEAD
   agreement, legal-form agreement; content-core features - the core name minus the locality
   words of either record (`Tourcoing Ecole SARL` vs `Tourcoing Amis SARL` -> `ecole` vs `amis`):
   Jaccard, disjoint flag, IDF share of the non-shared words.
+=======
+  agreement, legal-form agreement.
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 - Address features: full / street / locality string similarities; separate match and conflict
   flags for house number (both directions), number set, compound id, locality (city) and state;
   number-set intersections and extra numbers; IDF cosine / containment of address tokens;
   sibling detectors - signed house-number difference, whether it is one of the generator's
   sibling offsets, and whether any candidate number equals a Source 1 number plus such an offset
+<<<<<<< HEAD
   (covers compound numbers such as `116-47 -> 116-49`); a clipped-number flag (one house number
   equals the other with its first or last digit dropped).
+=======
+  (covers compound numbers such as `116-47 -> 116-49`).
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 - Other: blocking cosines and rank, number of candidates, source (S2/S3), domain /
   transliterated / alias flags, missing-address flags; ambiguity context (how many Source 1 and
   Source 2/3 records share the name and the normalised address).
@@ -148,6 +198,7 @@ country (exact search, numba parallel inverted-index accumulation, ~10 min for 1
   entities, rank and margin over the best competing entity (p1, address cosine, name cosine);
   cluster support = similarity to the entity's other strong candidates (S2 <-> S3 consistency);
   sibling-cluster size (other candidates sharing the same sibling-offset number) and the number
+<<<<<<< HEAD
   of confident candidates confirming the entity's own house number; "twin" features - whether a
   confident candidate from the same source confirms the house number or has an identical content
   core (a second noisy copy vs a neighbouring business); uncertain-candidate count and rank among
@@ -176,6 +227,25 @@ probabilities are calibrated, which the unlabelled-country path relies on. A cou
 calibration softened by a temperature of 1.5 and no missed-match term: on the leave-one-country-out
 rehearsals this was the only setting that improved both directions over the previous rule (US
 model on India 0.96774 -> 0.96807, India model on US 0.97766 -> 0.97769).
+=======
+  of confident candidates confirming the entity's own house number.
+
+**Model type:** two LightGBM binary classifiers (MIT licence; 700 / 500 rounds, 127 leaves,
+trained on the candidates of a 12 % sample of training entities, 9.0 M pairs), each a 2-fold
+ensemble cross-fitted by Source 1 entity - every training pair gets an out-of-fold score and no
+candidate of an entity leaks across the split; the fold models are averaged on test.
+Stage-1 top features (gain): combined blocking score, address cosine, blocking rank, address
+token-set ratio, domain partial ratio, the two sibling-offset flags. Stage-2 top features: p1
+(87 %) and the one-to-one margin p1 - best rival entity (10 %).
+
+**Threshold selection method:** each S2/S3 record is first assigned to the entity where it scores
+highest (one-to-one). Then, per entity, the top-k candidates maximising the expected F0.5
+(1.25 sum_topk p^g / (0.25 sum p^g + k)) are kept, or none when the singleton probability
+prod(1 - p) is higher. g and a probability floor are tuned per country on half of the entities
+and evaluated on the other half; per-(country, source) thresholds were evaluated the same way
+(0.9827) and lost to this rule (0.9829). France has no labels and uses the stricter of the tuned
+rules plus a 0.05 margin on the probability floor.
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 
 ---
 
@@ -186,6 +256,7 @@ Held-out macro F0.5 on the labelled training universe (all 2.21 M Source 1 entit
 
 | | evaluated on fold 0 | evaluated on fold 1 | singletons | non-singletons | pair precision | pair recall | blocking entity recall |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+<<<<<<< HEAD
 | India | 0.9845 | 0.9843 | 0.982-0.984 | 0.984-0.985 | 0.997 | 0.960 | 0.977 |
 | US | 0.9871 | 0.9872 | 0.986-0.987 | 0.987 | 0.998 | 0.966 | 0.984 |
 | **Overall** | **0.9861** | **0.9860** | 0.985 | 0.986 | 0.998 | 0.964 | 0.982 |
@@ -197,13 +268,28 @@ Held-out macro F0.5 on the labelled training universe (all 2.21 M Source 1 entit
   0.991-0.992, 0.987-0.988 when the ambiguous records below are excluded, and 0.993-0.994 with
   perfect blocking as well - i.e. blocking was the largest avoidable loss, which the fourth
   iteration attacked. About 2 % of all true pairs are Source 2/3
+=======
+| India | 0.9824 | 0.9825 | 0.979-0.985 | 0.982-0.983 | 0.997 | 0.956 | 0.973 |
+| US | 0.9832 | 0.9832 | 0.988 | 0.983 | 0.998 | 0.956 | 0.974-0.975 |
+| **Overall** | **0.9829** | **0.9829** | 0.984-0.987 | 0.983 | 0.9975 | 0.956 | 0.974 |
+
+- **F_0.5 Score (macro):** 0.9829 held-out on the training universe (iterations: 0.9808, 0.9816,
+  0.9829). Public leaderboard: 0.9737 for the 0.9816 model (submitted by the team).
+- **Ceiling:** a perfect classifier on the current candidates would score 0.991-0.992 on the
+  training universe (blocking misses cost 0.0086). About 2 % of all true pairs are Source 2/3
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
   records with an empty address whose name is shared by several Source 1 entities (e.g. 253 x
   "Primary Care Group"); nothing in the data identifies their entity, so they are left unmatched
   (precision first). Leakage such as row order or identifier patterns was deliberately not used.
 - **Test set (no labels):** 94 % of test entities receive matches in every country (training
   truth: 94.4 % non-singletons); France, which has no training labels, shows the same match rate
+<<<<<<< HEAD
   and a similar matches-per-entity profile (3.24 vs 3.34 / 3.40 predicted pairs per entity in
   India / the US).
+=======
+  and matches-per-entity profile as India and the US, and manual inspection of French pairs in
+  every probability band looked correct above the decision floor.
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 - **Train -> test shift (why the leaderboard is below held-out):** the test set has more Source
   2/3 records per entity (5.8 vs 4.7). Exact same-address matches per entity are unchanged (1.68
   US, 1.25 India), but candidates with the same name and street and a house number shifted by a
@@ -214,6 +300,7 @@ Held-out macro F0.5 on the labelled training universe (all 2.21 M Source 1 entit
   level. The sibling features (third iteration) cut training false merges by 23 % (sibling-type
   false merges by 80 %) and raise the model's self-estimated test F0.5 in every country (India
   0.9917 -> 0.9929, US 0.9885 -> 0.9902, France 0.979 -> 0.981).
+<<<<<<< HEAD
 - **Test-like holdout:** test entities have the same number of confident candidates as training
   entities (3.37 vs 3.35 with p1 >= 0.5) but more uncertain ones (p1 in [0.1, 0.9): 0.21 -> 0.27 /
   0.29 per entity in India / US, 0.75 in France) and 2.2x more same-name sibling candidates (US).
@@ -223,11 +310,14 @@ Held-out macro F0.5 on the labelled training universe (all 2.21 M Source 1 entit
   the leaderboard total implies is around 0.95-0.97. Re-tuning the decision rule on the re-weighted
   holdout gave nothing (0.98177 -> 0.98174), neither did tuning France's rule on training entities
   weighted to France's mix (0.97161 -> 0.97162), so the tuned rules are kept.
+=======
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 - **Common false positives (wrong merges):** same-name businesses whose S2/S3 record belongs to
   an entity that is not in Source 1 (e.g. another "Red Consulting Private Limited" in the same
   district); alias-named records at multi-tenant addresses (two companies at "C-28, Second Floor
   Panchsheel Enclave"); one-letter name variants at the same address ("Jarliq" / "Jarluq York
   Company"); in France, siblings that swap a generic name word ("Merignac Amis SA" / "Merignac
+<<<<<<< HEAD
   Club S.A."). In training, the corresponding pair shapes (one generic word swapped at the same
   address, sibling offset) are 96-99.5 % precise among predicted pairs, so no France-specific
   rejection rule is applied without labels to justify it.
@@ -259,6 +349,9 @@ Held-out macro F0.5 on the labelled training universe (all 2.21 M Source 1 entit
     France sibling offsets, US sibling offsets, France pairs on which the two single-country
     models disagree); each observed change is inverted into the precision of that shape with a
     Monte-Carlo simulator of the metric. They are used only for binary keep/drop decisions.
+=======
+  Club S.A.").
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 - **Common false negatives (missed matches):** records with an empty address whose name is
   shared by several Source 1 entities (genuinely ambiguous); names replaced by random aliases
   with mutated house numbers; acronym domains (`bindia.com`); heavy typos in both fields.
@@ -270,11 +363,16 @@ Held-out macro F0.5 on the labelled training universe (all 2.21 M Source 1 entit
 Most of the gain came from understanding the generator: undoing its noise operations, making
 blocking robust to repeated names, and exploiting the fact that each Source 2/3 record belongs to
 exactly one Source 1 entity, and, for the test set, recognising the generator's sibling
+<<<<<<< HEAD
 distractors. Precision is 0.998; the remaining loss is blocking recall (98.1 %, mostly India) and
 records that are ambiguous by construction (empty addresses under names shared by many businesses).
 The sixth iteration's gains came from a larger training sample made possible by a memory-safe
 data path and from same-source "twin" features; for the unlabelled country the most useful tools
 were label-free: leave-one-country-out rehearsals and known non-matches.
+=======
+distractors. Precision is 0.9975; the remaining loss is blocking recall (97.4 %) and records that
+are ambiguous by construction (empty addresses under names shared by many businesses).
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 
 ---
 
@@ -295,22 +393,31 @@ python code/business_entity_resolution/src/run.py --mode all --train-dir dataset
 `model.py` (LightGBM fold ensembles), `decide.py` (group features, one-to-one, decisions),
 `metrics.py` (macro F0.5 + breakdowns), `pipeline.py` (stages), `run.py` (CLI);
 `evaluate_holdout.py` re-evaluates from saved out-of-fold scores; `test_pipeline.py` unit tests.
+<<<<<<< HEAD
 Only MIT / BSD / Apache libraries; no external data, APIs or pretrained models. Transductive but
 label-free uses of the test records, as in any unsupervised preprocessing: TF-IDF / IDF
 statistics and the locality -> region table are fitted per country on that country's records.
+=======
+Only MIT / BSD / Apache libraries; no external data, APIs or pretrained models.
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 
 ### B. Additional Results
 
 Blocking recall progression on India training data: single combined TF-IDF index 93.3 % ->
 separately normalised name / address / char blocks 95.3 % -> + second house number and number-pair
+<<<<<<< HEAD
 keys 97.1 % -> deeper address-only list 97.25 % -> clipped-number and street x locality keys
 97.45 % (US: 97.4 % -> 98.4 %; on a 60 K-entity US sample the new keys gave +0.9 points at the
 same list depth, while doubling the list depths alone gave +0.5 points at 1.8x the candidates).
+=======
+keys 97.1 % -> deeper address-only list 97.25 %.
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 
 Held-out macro F0.5 by iteration (both folds): first full model (thresholds 0.9805, expected-F
 0.9808); + numeric-tag stripping, acronym/domain features, record-level address/name competition
 margins, deeper address list, 12 % training sample (thresholds 0.9814, expected-F 0.9816,
 public leaderboard 0.9737); + sibling-offset pair and group features (thresholds 0.9827,
+<<<<<<< HEAD
 expected-F 0.9829, public leaderboard 0.9772); + clipped-number / street x locality blocking keys,
 address list 20, clipped-number pair feature (thresholds 0.9850, expected-F 0.9852); + deeper
 combined list for India (top 40 of at most 60; India recall 97.45 -> 97.7 %; on a 60 K-entity
@@ -320,5 +427,8 @@ public leaderboard 0.9792); + content-core, same-source twin and uncertain-count
 regions filled from localities, 20 % training sample via memory-mapped datasets, calibrated exact
 expected-F0.5 decision (thresholds 0.9859, plug-in 0.98606, exact **0.98606**: India 0.9843/0.9845,
 US 0.9871/0.9872). Expected-F0.5 with an additional learned entity-level no-match model:
+=======
+expected-F **0.9829**). Expected-F0.5 with an additional learned entity-level no-match model:
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 +0.00002 (not kept). A per-bucket prior-shift correction of the probabilities was also tested
 in simulation and did not help (not kept).

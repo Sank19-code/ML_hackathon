@@ -36,8 +36,11 @@ GROUP_FEATURES = [
     "p1_max_src_s1", "p1_rank_src_s1", "n_s1_j", "p1_rank_j", "p1_max_other_j", "p1_margin_j",
     "support_max", "support_mean", "addr_margin_j", "name_margin_j", "n_addr_hi_j",
     "sib_cluster_n", "n_conf_ha_hi",
+<<<<<<< HEAD
     # v6: exact-twin / content-core context and shift-stable counts
     "n_conf_ha_src", "n_conf_cc_eq", "n_conf_cc_eq_src", "p1_nunc_s1", "p1_rank_nonsib_s1",
+=======
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 ]
 
 
@@ -62,6 +65,7 @@ def j_aggregates(pairs: pl.DataFrame) -> pl.DataFrame:
 
 def group_features_chunk(chunk: pl.DataFrame, jagg: pl.DataFrame, sim_fn=None, top: int = 4) -> np.ndarray:
     """
+<<<<<<< HEAD
     chunk: rows (i1, j, p1, is_s2, cos_addr, cos_name, hb, sib, has_ha, cc) containing complete
     Source 1 groups (hb = candidate house number, sib = sibling-offset flag, has_ha = candidate
     numbers contain the Source 1 house number, cc = content-core Jaccard, -1 unknown).
@@ -71,6 +75,15 @@ def group_features_chunk(chunk: pl.DataFrame, jagg: pl.DataFrame, sim_fn=None, t
     if "cc" not in chunk.columns:
         chunk = chunk.with_columns(pl.lit(-1.0).alias("cc"))
     df = chunk.select("i1", "j", "p1", "is_s2", "cos_addr", "cos_name", "hb", "sib", "has_ha", "cc").with_columns(
+=======
+    chunk: rows (i1, j, p1, is_s2, cos_addr, cos_name, hb, sib, has_ha) containing complete
+    Source 1 groups (hb = candidate house number, sib = sibling-offset flag, has_ha = candidate
+    numbers contain the Source 1 house number).
+    sim_fn(J, K): similarity between Source 2/3 records J[i] and K[i] (cluster support).
+    Returns float32 (n, len(GROUP_FEATURES)) in chunk row order.
+    """
+    df = chunk.select("i1", "j", "p1", "is_s2", "cos_addr", "cos_name", "hb", "sib", "has_ha").with_columns(
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
         pl.int_range(0, pl.len()).alias("_pos"))
     df = df.join(jagg, on="j", how="left").with_columns(
         pl.col("p1").rank("ordinal", descending=True).over("i1").cast(pl.Float32).alias("p1_rank_s1"),
@@ -97,6 +110,7 @@ def group_features_chunk(chunk: pl.DataFrame, jagg: pl.DataFrame, sim_fn=None, t
          .otherwise(pl.col("a1_j"))).alias("addr_margin_j"),
         (pl.col("cos_name") - pl.when(pl.col("cos_name") >= pl.col("n1_j")).then(pl.col("n2_j"))
          .otherwise(pl.col("n1_j"))).alias("name_margin_j"),
+<<<<<<< HEAD
         # a confident copy from the SAME source confirming the entity's house number / content core
         # (a second copy with a typo vs a neighbouring business)
         ((pl.col("has_ha") & (pl.col("p1") > 0.5)).cast(pl.Int32).sum().over(["i1", "is_s2"])
@@ -107,6 +121,8 @@ def group_features_chunk(chunk: pl.DataFrame, jagg: pl.DataFrame, sim_fn=None, t
          - ((pl.col("cc") >= 1.0) & (pl.col("p1") > 0.5)).cast(pl.Int32)).cast(pl.Float32).alias("n_conf_cc_eq_src"),
         ((pl.col("p1") >= 0.1) & (pl.col("p1") < 0.9)).sum().over("i1").cast(pl.Float32).alias("p1_nunc_s1"),
         pl.col("p1").rank("ordinal", descending=True).over(["i1", "sib"]).cast(pl.Float32).alias("p1_rank_nonsib_s1"),
+=======
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     )
 
     if sim_fn is not None:
@@ -212,6 +228,7 @@ def tune_expected_f(best: pl.DataFrame, entities: pl.DataFrame, gt: pl.DataFrame
                 res.append((f, gamma, missed, floor))
     res.sort(reverse=True)
     return {"gamma": res[0][1], "missed": res[0][2], "floor": res[0][3]}, res[0][0]
+<<<<<<< HEAD
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -410,3 +427,5 @@ def apply_bucket_offsets(q: np.ndarray, buckets: pl.Series, offsets: Dict[str, f
     b = np.array([float(offsets.get(x, 0.0)) for x in buckets.to_list()]) if len(buckets) else np.zeros(0)
     q = np.clip(q, 1e-6, 1 - 1e-6)
     return 1.0 / (1.0 + np.exp(-(np.log(q / (1 - q)) + b)))
+=======
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10

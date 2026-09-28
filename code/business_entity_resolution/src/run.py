@@ -55,6 +55,7 @@ def main():
                     help="where models, thresholds and the transliteration dictionary are stored")
     ap.add_argument("--validator", default=None, help="path to utils/validate_submission.py")
     ap.add_argument("--n-jobs", type=int, default=pipeline.DEFAULT_CONFIG["n_jobs"])
+<<<<<<< HEAD
     ap.add_argument("--reuse-stage1", action="store_true",
                     help="train / predict: keep the stage-1 model and reuse saved stage-1 scores of unchanged candidates")
     ap.add_argument("--force", action="store_true", help="recompute cached blocking")
@@ -74,6 +75,13 @@ def main():
     for key in ("stage1_sample", "stage2_sample"):
         if getattr(args, key) is not None:
             cfg[key] = getattr(args, key)
+=======
+    ap.add_argument("--reuse-stage1", action="store_true", help="train: keep the stage-1 model and p1")
+    ap.add_argument("--force", action="store_true", help="recompute cached blocking")
+    args = ap.parse_args()
+
+    cfg = dict(pipeline.DEFAULT_CONFIG, n_jobs=args.n_jobs)
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     ws = pipeline.Workspace(args.work_dir, os.path.abspath(args.model_dir))
     t0 = time.time()
 

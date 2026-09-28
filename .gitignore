@@ -23,3 +23,7 @@ work/
 
 # Submission archive (built from output/ + code/ + Documentation_template.md)
 *_submission.zip
+<<<<<<< HEAD
+=======
+temp/
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10

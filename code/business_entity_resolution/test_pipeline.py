@@ -97,6 +97,7 @@ class TestBlockingAndFeatures(unittest.TestCase):
         self.assertGreaterEqual(rest[0], 0)
         self.assertEqual((pref[1], rest[1]), (-1, -1))  # multi-token name: not applicable
 
+<<<<<<< HEAD
     def test_clipped_house_number(self):
         # the noise clips house numbers (2424 -> 424) and renames the business: only the crossed
         # exact<->clipped key links the pair; the pair feature flags it
@@ -112,6 +113,8 @@ class TestBlockingAndFeatures(unittest.TestCase):
         X = PairFeaturizer(s1, s2).featurize(c.filter((pl.col("i1") == 0) & (pl.col("j") == 0)))
         self.assertEqual(X[0, FEATURE_NAMES.index("house_trunc")], 1)
 
+=======
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     def test_sparse_kernels(self):
         f = word_features(self.s1)
         A, B = build_tfidf(f, f, len(self.s1), len(self.s1), {"w": 1.0}, 100, 1)
@@ -121,6 +124,7 @@ class TestBlockingAndFeatures(unittest.TestCase):
         self.assertTrue(np.allclose(st[st[:, 0] > 0, 1], 1.0, atol=1e-5))
 
 
+<<<<<<< HEAD
 class TestV6(unittest.TestCase):
     def test_content_core(self):
         # the town word shared by both names is masked: "ecole" vs "amis" is a different business
@@ -169,6 +173,8 @@ class TestV6(unittest.TestCase):
         self.assertEqual(out["a_state"].to_list(), ["nouvelle aquitaine", ""])
 
 
+=======
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 class TestMetricAndDecisions(unittest.TestCase):
     def test_metric(self):
         gt = {"a": {"x", "y"}, "b": set(), "c": {"z"}}

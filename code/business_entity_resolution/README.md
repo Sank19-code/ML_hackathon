@@ -5,10 +5,16 @@ optimising the precision-weighted macro F0.5 metric. Runs end to end on a 16 GB 
 Windows or Linux machine with CPU only.
 
 ```
+<<<<<<< HEAD
 normalise (undo the noise) -> TF-IDF top-k blocking per country -> 78 pair + 6 context features
 -> LightGBM stage 1 (cross-fitted) -> group / one-to-one / cluster / twin features -> LightGBM stage 2
 -> one-to-one assignment -> calibration -> per-entity exact expected-F0.5 decision -> output TSVs
 -> validator
+=======
+normalise (undo the noise) -> TF-IDF top-k blocking per country -> 74 pair + 6 context features
+-> LightGBM stage 1 (cross-fitted) -> group / one-to-one / cluster features -> LightGBM stage 2
+-> one-to-one assignment -> per-entity expected-F0.5 decision -> output TSVs -> validator
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 ```
 
 ## 1. Environment
@@ -37,6 +43,7 @@ it can also be run separately:
 
 | mode | what it does | measured time* |
 | --- | --- | --- |
+<<<<<<< HEAD
 | `prepare` | learn the transliteration dictionary, normalise all six source files, block train and test | 40 min (+25 min normalisation on first run) |
 | `train` | stage-1 / stage-2 LightGBM (cross-fitted), held-out evaluation, decision tuning -> `model/` | ~2.5 h |
 | `predict` | score the test candidates, one-to-one assignment, decisions, write both TSVs | ~1 h |
@@ -62,6 +69,19 @@ Optional flags: `--predict-countries India US` scores only some test countries,
 Held-out macro F0.5 of the shipped models (tuned on one half of the training entities,
 evaluated on the other): **0.9861** (India 0.9843-0.9845, US 0.9871-0.9872), trained with
 `--stage1-sample 0.20 --stage2-sample 0.20`.
+=======
+| `prepare` | learn the transliteration dictionary, normalise all six source files, block train and test | 40 min |
+| `train` | stage-1 / stage-2 LightGBM (cross-fitted), held-out evaluation, decision tuning -> `model/` | 90 min |
+| `predict` | score the test candidates, one-to-one assignment, decisions, write both TSVs | 50 min |
+| `validate` | run the official `validate_submission.py` on `output/` | 1 min |
+
+\* `--mode all` took 2.9 h on a 16-thread laptop CPU (16 GB RAM). Pair features are computed on
+the fly (~11-25 µs per pair), so nothing heavier than the candidate tables (~2.5 GB) is written
+to the work directory.
+
+Held-out macro F0.5 of the shipped models (tuned on one half of the training entities,
+evaluated on the other): **0.9829** (India 0.9824-0.9825, US 0.9832).
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 
 The trained artefacts in `model/` (`stage1.pkl`, `stage2.pkl`, `thresholds.json`,
 `translit.json`, `train_summary.json`) let `--mode predict` run without retraining.
@@ -79,11 +99,17 @@ src/
   translit.py    learns the native-script -> Latin word dictionary from training pairs
   data.py        TSV loading + parallel normalisation, cached as parquet
   blocking.py    per-country TF-IDF key features + numba sparse top-k retrieval
+<<<<<<< HEAD
   features.py    78 pair features (rapidfuzz cpdist, IDF cosine / containment, flags, sibling offsets,
                  content core), locality -> region imputation
   model.py       LightGBM fold ensemble (cross-fitting by Source 1 entity)
   decide.py      group / one-to-one / cluster-support / twin features, calibration, exact
                  expected-F0.5 decision (numba Poisson-binomial DP), decision rules
+=======
+  features.py    74 pair features (rapidfuzz cpdist, IDF cosine / containment, flags, sibling offsets)
+  model.py       LightGBM fold ensemble (cross-fitting by Source 1 entity)
+  decide.py      group / one-to-one / cluster-support features, decision rules
+>>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
   metrics.py     official macro F0.5 + breakdowns + blocking recall
   pipeline.py    stage orchestration (per country, chunked, memory bounded)
   run.py         command line entry point
