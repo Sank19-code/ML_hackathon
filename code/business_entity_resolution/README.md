@@ -1,108 +1,94 @@
 # Business Entity Resolution Pipeline (ML Challenge 2026)
 
-This repository contains an end-to-end, high-performance Machine Learning pipeline for multi-source entity resolution, specifically designed to solve the **Amazon ML Challenge 2026**.
+Matches every Source 1 business to its Source 2 / Source 3 records (zero, one or many),
+optimising the precision-weighted macro F0.5 metric. Runs end to end on a 16 GB / 16-thread
+Windows or Linux machine with CPU only.
 
-The system matches deduplicated reference entities from **Source 1** to zero, one, or many corresponding records in **Source 2** and **Source 3**, optimizing for the precision-weighted macro **$F_{0.5}$ metric**.
+```
+normalise (undo the noise) -> TF-IDF top-k blocking per country -> 78 pair + 6 context features
+-> LightGBM stage 1 (cross-fitted) -> group / one-to-one / cluster / twin features -> LightGBM stage 2
+-> one-to-one assignment -> calibration -> per-entity exact expected-F0.5 decision -> output TSVs
+-> validator
+```
 
----
+## 1. Environment
 
-## 1. System Requirements & Environment
+- Python 3.11 (tested with 3.11.9), 16 GB RAM, ~8 GB free disk for the work directory.
+- `pip install -r requirements.txt` (numpy, scipy, polars, pyarrow, rapidfuzz, lightgbm,
+  numba, anyascii - all MIT / BSD / Apache licensed). No pretrained model, no external
+  data or API is used: every dictionary is either learned from the training labels or a
+  static normalisation table in `src/normalize.py`.
 
-- **Python**: 3.9+ (tested on Python 3.9.18)
-- **OS**: Linux / macOS / Windows
-- **Key Dependencies**:
-  - `polars` (Ultra-fast parallel DataFrame engine)
-  - `rapidfuzz` (C++ SIMD-accelerated string similarity)
-  - `lightgbm` (Histogram-based Gradient Boosted Trees)
-  - `numpy`, `scipy`, `scikit-learn`, `tqdm`
+## 2. Reproduce `output/matching_results.tsv` and `output/candidate_pairs.tsv`
 
-Install all dependencies via:
+From the repository root (paths below assume the student resource layout; point
+`--train-dir/--test-dir` wherever the TSVs live):
 
 ```bash
-pip install -r requirements.txt
+python code/business_entity_resolution/src/run.py --mode all \
+    --train-dir dataset/train --test-dir dataset/test \
+    --output-dir output --work-dir work \
+    --model-dir code/business_entity_resolution/model \
+    --validator utils/validate_submission.py
 ```
 
----
+`--mode all` runs every stage in order; each stage caches its results in `--work-dir` so
+it can also be run separately:
 
-## 2. Directory Structure
+| mode | what it does | measured time* |
+| --- | --- | --- |
+| `prepare` | learn the transliteration dictionary, normalise all six source files, block train and test | 40 min (+25 min normalisation on first run) |
+| `train` | stage-1 / stage-2 LightGBM (cross-fitted), held-out evaluation, decision tuning -> `model/` | ~2.5 h |
+| `predict` | score the test candidates, one-to-one assignment, decisions, write both TSVs | ~1 h |
+| `validate` | run the official `validate_submission.py` on `output/` | 1 min |
 
-```text
-code/business_entity_resolution/
-├── src/
-│   ├── __init__.py
-│   ├── normalize.py       # Text canonicalization, legal suffixes, and token cleaning
-│   ├── blocking.py        # Country-partitioned multi-pass inverted index blocking
-│   ├── features.py        # Pairwise string similarity and structural feature extraction
-│   ├── metrics.py         # Official macro F_0.5 evaluation metric with singleton handling
-│   ├── model.py           # LightGBM classifier with F_0.5 threshold optimization
-│   ├── pipeline.py        # End-to-end training and inference execution
-│   └── run.py             # CLI entry point
-├── requirements.txt       # Pinned dependencies
-└── README.md              # Reproduction guide
+\* measured on a 16-thread laptop CPU with 16 GB RAM (98 M training / 78 M test candidate pairs).
+Pair features are computed on the fly (~11-25 µs per pair); only the sampled training rows are
+written, as float32 memory-mapped blocks in `<work-dir>/tmp` (~7 GB for stage 1, ~9 GB for
+stage 2, deleted after each fit), which LightGBM bins without stacking them in RAM. On a 16 GB machine run `train` and `predict` as
+separate processes (a long-lived process keeps the training matrices' memory and starts paging),
+and keep Windows from power-throttling the background process.
+
+Countries are an open set: a test country without training labels (France) uses the pooled
+calibration with the unlabelled-country temperature / missed-match settings in
+`model/thresholds.json` (chosen on leave-one-country-out rehearsals); no country name appears in
+the pipeline logic (the deeper India blocking list is triggered by the share of non-Latin-script
+records).
+
+Optional flags: `--predict-countries India US` scores only some test countries,
+`--train-countries`, `--stage1-sample` / `--stage2-sample` change what the models are fitted on,
+`--reuse-stage1` keeps the stage-1 model and its saved out-of-fold scores.
+
+Held-out macro F0.5 of the shipped models (tuned on one half of the training entities,
+evaluated on the other): **0.9861** (India 0.9843-0.9845, US 0.9871-0.9872), trained with
+`--stage1-sample 0.20 --stage2-sample 0.20`.
+
+The trained artefacts in `model/` (`stage1.pkl`, `stage2.pkl`, `thresholds.json`,
+`translit.json`, `train_summary.json`) let `--mode predict` run without retraining.
+
+`evaluate_holdout.py` re-runs the held-out evaluation / decision tuning from the saved
+out-of-fold scores (no retraining) and prints macro F0.5 overall, by country, for
+singletons and the blocking recall. `test_pipeline.py` holds unit tests.
+
+## 3. Layout
+
+```
+src/
+  normalize.py   name / address canonicalisation (transliteration, alias phrases, legal
+                 forms, OCR swaps, domains, states, street types, house numbers, ...)
+  translit.py    learns the native-script -> Latin word dictionary from training pairs
+  data.py        TSV loading + parallel normalisation, cached as parquet
+  blocking.py    per-country TF-IDF key features + numba sparse top-k retrieval
+  features.py    78 pair features (rapidfuzz cpdist, IDF cosine / containment, flags, sibling offsets,
+                 content core), locality -> region imputation
+  model.py       LightGBM fold ensemble (cross-fitting by Source 1 entity)
+  decide.py      group / one-to-one / cluster-support / twin features, calibration, exact
+                 expected-F0.5 decision (numba Poisson-binomial DP), decision rules
+  metrics.py     official macro F0.5 + breakdowns + blocking recall
+  pipeline.py    stage orchestration (per country, chunked, memory bounded)
+  run.py         command line entry point
+evaluate_holdout.py, test_pipeline.py, requirements.txt, model/
 ```
 
----
-
-## 3. End-to-End Reproduction Instructions
-
-### Step 1: Run Full Pipeline (Training + Inference)
-
-From the project root:
-
-```bash
-python3 code/business_entity_resolution/src/run.py \
-    --mode all \
-    --train-dir dataset/train \
-    --test-dir dataset/test \
-    --output-dir output
-```
-
-This will:
-1. Load training records from `dataset/train/` (`train_source1.tsv`, `train_source2.tsv`, `train_source3.tsv`, `train_ground_truth.tsv`).
-2. Run multi-pass blocking and candidate generation.
-3. Extract pairwise string similarity and structural features.
-4. Train the LightGBM classifier and optimize the decision threshold $\tau^*$ on a holdout validation set to directly maximize macro $F_{0.5}$.
-5. Run candidate generation and model inference on `dataset/test/`.
-6. Generate both required output files in `output/`:
-   - `output/candidate_pairs.tsv`
-   - `output/matching_results.tsv`
-7. Automatically run `utils/validate_submission.py` to confirm zero format violations.
-
-### Step 2: Separate Training & Prediction (Optional)
-
-To train and save the model:
-
-```bash
-python3 code/business_entity_resolution/src/run.py \
-    --mode train \
-    --train-dir dataset/train \
-    --model-path code/business_entity_resolution/model.pkl
-```
-
-To run inference using the trained model on test data:
-
-```bash
-python3 code/business_entity_resolution/src/run.py \
-    --mode predict \
-    --test-dir dataset/test \
-    --output-dir output \
-    --model-path code/business_entity_resolution/model.pkl
-```
-
----
-
-## 4. Methodology Highlights
-
-1. **Strict Country Partitioning**:
-   - Analysis of ground truth confirmed that true matches **never** cross national boundaries ($0\%$ cross-country matching).
-   - All blocking and inference are partitioned by country (`US`, `India`, `France`), drastically reducing search space and eliminating cross-country false merges.
-2. **Multi-Pass Inverted Index Blocking**:
-   - Clean compact names (legal suffixes and domain extensions stripped).
-   - Sorted name tokens (order-invariant matching).
-   - Address numbers combined with street tokens and distinctive name tokens.
-3. **High-Speed Pairwise Feature Engineering**:
-   - SIMD-accelerated Levenshtein, Token Sort Ratio, Token Set Ratio, Partial Ratio, and Jaro-Winkler via `rapidfuzz`.
-   - Structural address overlap, door/plot/postal number intersections, and empty address indicators.
-4. **Precision-Weighted Macro $F_{0.5}$ Optimization**:
-   - Precision is weighted $2\times$ over recall to heavily penalize false merges.
-   - Threshold $\tau^*$ is selected via exhaustive grid search on validation data to maximize the exact competition macro $F_{0.5}$ metric while identifying singletons ($11.2\%$ of records).
+See `Documentation_template.md` at the repository root for the full methodology and
+results.

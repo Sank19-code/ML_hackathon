@@ -1,8 +1,10 @@
-numpy>=1.23.5
-pandas>=2.0.0
-scipy>=1.10.0
-scikit-learn>=1.2.0
-polars>=1.0.0
-rapidfuzz>=3.0.0
-lightgbm>=4.0.0
-tqdm>=4.65.0
+# Python 3.11 (tested with 3.11.9 on Windows 11, 16 logical CPUs, 16 GB RAM)
+numpy==2.3.0
+scipy==1.17.1
+polars==1.44.2
+pyarrow==21.0.0
+rapidfuzz==3.14.5
+lightgbm==4.7.0
+numba==0.67.0
+llvmlite==0.49.0
+anyascii==0.3.3

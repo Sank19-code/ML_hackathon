@@ -17,3 +17,9 @@ venv/
 
 # Generated intermediate data (exceeds GitHub 100MB limit)
 *.parquet
+
+# Pipeline work directory (normalised data, candidate tables, scores, scratch scripts)
+work/
+
+# Submission archive (built from output/ + code/ + Documentation_template.md)
+*_submission.zip

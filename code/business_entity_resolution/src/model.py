@@ -1,114 +1,107 @@
+"""
+Gradient-boosted pair classifier (LightGBM, MIT licence) with cross-fitting.
+
+Training rows are candidate pairs from the training universe. Folds are assigned by
+Source 1 entity (hash of the entity id), so every candidate of an entity sits in the
+same fold and no information leaks across the split. Each fold model scores the
+other fold, giving out-of-fold probabilities for every training pair; those are used
+to build the second-stage (group) features and to tune the decision thresholds.
+At test time the fold models are averaged.
+"""
 import os
 import pickle
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Sequence
 
 import lightgbm as lgb
 import numpy as np
 
-try:
-    from .metrics import compute_macro_f05
-    from .features import FEATURE_NAMES
-except ImportError:
-    from metrics import compute_macro_f05
-    from features import FEATURE_NAMES
+DEFAULT_PARAMS = {
+    "objective": "binary",
+    "learning_rate": 0.08,
+    "num_leaves": 127,
+    "min_data_in_leaf": 100,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 1,
+    "lambda_l2": 1.0,
+    "max_bin": 127,
+    "verbose": -1,
+    "num_threads": 15,
+    "seed": 42,
+}
 
 
-class EntityResolutionModel:
-    def __init__(self, optimal_threshold: float = 0.65):
-        # LightGBM: fast, low-memory, excellent on tabular similarity features
-        self.model = lgb.LGBMClassifier(
-            n_estimators=500,       # More trees for better recall of subtle matches
-            learning_rate=0.05,     # Slower LR + more estimators → lower variance
-            num_leaves=127,         # More leaves captures complex interactions
-            max_depth=8,
-            min_child_samples=20,
-            subsample=0.8,
-            subsample_freq=1,
-            colsample_bytree=0.8,
-            reg_alpha=0.1,          # L1 for sparsity
-            reg_lambda=0.1,         # L2 for smoothness
-            class_weight='balanced', # Handles imbalanced pos/neg candidate pool
-            random_state=42,
-            n_jobs=-1,
-            importance_type='gain',
-            verbose=-1
-        )
-        self.optimal_threshold = optimal_threshold
-        self.feature_names = FEATURE_NAMES
+def fold_of(ids: Sequence[str], n_folds: int = 2, salt: int = 7) -> np.ndarray:
+    """Deterministic fold assignment from the numeric part of the entity id."""
+    nums = np.array([int(s.split("-", 1)[1]) for s in ids], dtype=np.int64)
+    return ((nums * 2654435761 + salt) % 1000003) % n_folds
 
-    def fit(self, X: np.ndarray, y: np.ndarray):
-        """Train LightGBM binary classifier on candidate pair features."""
-        pos = np.sum(y)
-        neg = len(y) - pos
-        print(f"Training LightGBM: {len(X)} pairs | Positives: {pos} ({pos/len(y)*100:.2f}%) | Negatives: {neg}")
-        self.model.fit(X, y, feature_name=self.feature_names)
-        print("Training complete.")
-        # Print top feature importances
-        importances = sorted(
-            zip(self.feature_names, self.model.feature_importances_),
-            key=lambda x: x[1], reverse=True
-        )
-        print("Top 5 features by gain:")
-        for fname, imp in importances[:5]:
-            print(f"  {fname}: {imp:.1f}")
 
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Predict match probability for candidate pairs."""
-        return self.model.predict_proba(X)[:, 1]
+class FoldEnsemble:
+    def __init__(self, feature_names: List[str], params: Optional[Dict] = None, num_rounds: int = 600):
+        self.feature_names = list(feature_names)
+        self.params = dict(DEFAULT_PARAMS, **(params or {}))
+        self.num_rounds = num_rounds
+        self.models: List[lgb.Booster] = []
 
-    def optimize_threshold(
-        self,
-        val_s1_ids: List[str],
-        val_cand_pairs: List[Tuple[str, str]],
-        val_probs: np.ndarray,
-        val_ground_truth: Dict[str, Set[str]]
-    ) -> float:
+    def fit_fold(self, X: np.ndarray, y: np.ndarray, X_val: Optional[np.ndarray] = None,
+                 y_val: Optional[np.ndarray] = None) -> lgb.Booster:
+        dtrain = lgb.Dataset(X, label=y, feature_name=self.feature_names, free_raw_data=True)
+        valid = []
+        if X_val is not None:
+            valid = [lgb.Dataset(X_val, label=y_val, reference=dtrain)]
+        booster = lgb.train(self.params, dtrain, num_boost_round=self.num_rounds, valid_sets=valid,
+                            callbacks=[lgb.log_evaluation(200)] if valid else None)
+        self.models.append(booster)
+        return booster
+
+    def dataset(self, X, y: np.ndarray) -> lgb.Dataset:
         """
-        Grid-search the decision threshold τ* that maximises macro F_0.5.
-
-        F_0.5 weights precision 2× over recall — so the optimal τ* is
-        typically higher than the standard 0.5.
+        Bin the full training matrix once (the raw float matrix can then be freed). X may be one
+        float32 matrix or a list of float32 C-contiguous blocks (e.g. per-country .npy memory maps):
+        LightGBM bins a list of blocks without concatenating it, so raw rows never exist twice.
         """
-        print("Optimising threshold for macro F_0.5...")
+        blocks = X if isinstance(X, (list, tuple)) else [X]
+        blocks = [b if (b.dtype == np.float32 and b.flags["C_CONTIGUOUS"]) else np.ascontiguousarray(b, np.float32)
+                  for b in blocks]
+        ds = lgb.Dataset(blocks if len(blocks) > 1 else blocks[0], label=y, feature_name=self.feature_names,
+                         free_raw_data=True,
+                         params={"max_bin": self.params["max_bin"], "verbose": -1, "force_col_wise": True,
+                                 "bin_construct_sample_cnt": 1_000_000})
+        return ds.construct()
 
-        # Group per S1 entity
-        s1_to_scored_cands: Dict[str, List[Tuple[str, float]]] = {
-            s1_id: [] for s1_id in val_s1_ids
-        }
-        for (s1_id, cand_id), prob in zip(val_cand_pairs, val_probs):
-            if s1_id in s1_to_scored_cands:
-                s1_to_scored_cands[s1_id].append((cand_id, float(prob)))
+    def fit_subset(self, full: lgb.Dataset, rows: np.ndarray) -> lgb.Booster:
+        booster = lgb.train(self.params, full.subset(rows).construct(), num_boost_round=self.num_rounds)
+        self.models.append(booster)
+        return booster
 
-        best_score = -1.0
-        best_tau = 0.65
+    def predict(self, X: np.ndarray, fold: Optional[int] = None) -> np.ndarray:
+        if fold is not None:
+            return self.models[fold].predict(X, num_threads=self.params["num_threads"])
+        p = np.zeros(len(X), dtype=np.float64)
+        for m in self.models:
+            p += m.predict(X, num_threads=self.params["num_threads"])
+        return p / len(self.models)
 
-        # Fine-grained search from 0.40 to 0.90
-        for tau in np.arange(0.40, 0.91, 0.01):
-            preds: Dict[str, Set[str]] = {}
-            for s1_id, scored_list in s1_to_scored_cands.items():
-                preds[s1_id] = {cid for cid, p in scored_list if p >= tau}
+    def importance(self, top: int = 20):
+        imp = np.zeros(len(self.feature_names))
+        for m in self.models:
+            imp += m.feature_importance("gain")
+        order = np.argsort(-imp)[:top]
+        tot = imp.sum() or 1.0
+        return [(self.feature_names[i], imp[i] / tot) for i in order]
 
-            score = compute_macro_f05(val_ground_truth, preds)
-            if score > best_score:
-                best_score = score
-                best_tau = float(tau)
-
-        self.optimal_threshold = best_tau
-        print(f"  Optimal τ* = {best_tau:.3f}  →  Validation Macro F_0.5 = {best_score:.4f}")
-        return best_tau
-
-    def save(self, filepath: str):
-        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
-        with open(filepath, 'wb') as f:
-            pickle.dump({'model': self.model, 'threshold': self.optimal_threshold,
-                         'features': self.feature_names}, f)
-        print(f"Model saved → {filepath}")
+    def save(self, path: str):
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, "wb") as f:
+            pickle.dump({"feature_names": self.feature_names, "params": self.params,
+                         "num_rounds": self.num_rounds,
+                         "models": [m.model_to_string() for m in self.models]}, f)
 
     @classmethod
-    def load(cls, filepath: str):
-        with open(filepath, 'rb') as f:
-            data = pickle.load(f)
-        instance = cls(optimal_threshold=data['threshold'])
-        instance.model = data['model']
-        instance.feature_names = data.get('features', FEATURE_NAMES)
-        return instance
+    def load(cls, path: str) -> "FoldEnsemble":
+        with open(path, "rb") as f:
+            d = pickle.load(f)
+        obj = cls(d["feature_names"], d["params"], d["num_rounds"])
+        obj.models = [lgb.Booster(model_str=s) for s in d["models"]]
+        return obj
