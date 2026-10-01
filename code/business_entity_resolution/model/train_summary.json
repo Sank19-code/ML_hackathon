@@ -1,12 +1,6 @@
 {
-<<<<<<< HEAD
  "heldout_thr": 0.9859449890271397,
  "heldout_ef": 0.986056889443498,
  "heldout_exact": 0.986059994178462,
  "method": "exact"
-=======
- "heldout_thr": 0.9827136111459757,
- "heldout_ef": 0.98288652508254,
- "method": "ef"
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 }

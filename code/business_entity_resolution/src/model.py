@@ -55,7 +55,6 @@ class FoldEnsemble:
         self.models.append(booster)
         return booster
 
-<<<<<<< HEAD
     def dataset(self, X, y: np.ndarray) -> lgb.Dataset:
         """
         Bin the full training matrix once (the raw float matrix can then be freed). X may be one
@@ -69,12 +68,6 @@ class FoldEnsemble:
                          free_raw_data=True,
                          params={"max_bin": self.params["max_bin"], "verbose": -1, "force_col_wise": True,
                                  "bin_construct_sample_cnt": 1_000_000})
-=======
-    def dataset(self, X: np.ndarray, y: np.ndarray) -> lgb.Dataset:
-        """Bin the full training matrix once (the raw float matrix can then be freed)."""
-        ds = lgb.Dataset(X, label=y, feature_name=self.feature_names, free_raw_data=True,
-                         params={"max_bin": self.params["max_bin"], "verbose": -1})
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
         return ds.construct()
 
     def fit_subset(self, full: lgb.Dataset, rows: np.ndarray) -> lgb.Booster:

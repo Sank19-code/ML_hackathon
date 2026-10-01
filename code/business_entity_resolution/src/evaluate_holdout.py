@@ -14,8 +14,9 @@ saved scores without retraining:
   * rewrites <model-dir>/thresholds.json with the rule tuned on all training entities
 
 Usage:
-  python code/business_entity_resolution/evaluate_holdout.py \
-      --train-dir dataset/train --work-dir work --model-dir code/business_entity_resolution/model
+  python code/business_entity_resolution/src/evaluate_holdout.py \
+      --train-dir $DATA/dataset/train --work-dir work_retrain --model-dir model_retrained
+  (--model-dir is required: point it at a retrained model folder, never at the shipped model/)
 """
 import argparse
 import json
@@ -25,7 +26,7 @@ import sys
 import polars as pl
 
 _here = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_here, "src"))
+sys.path.insert(0, _here)
 
 import pipeline  # noqa: E402
 
@@ -34,7 +35,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--train-dir", default="dataset/train")
     ap.add_argument("--work-dir", default="work")
-    ap.add_argument("--model-dir", default=os.path.join(_here, "model"))
+    ap.add_argument("--model-dir", required=True, help="retrained model folder (its thresholds.json is rewritten)")
     args = ap.parse_args()
 
     ws = pipeline.Workspace(args.work_dir, os.path.abspath(args.model_dir))

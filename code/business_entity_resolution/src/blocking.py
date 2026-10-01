@@ -11,13 +11,10 @@ same-name businesses in other cities above the true, slightly misspelt record):
                  analogue: postcodes are almost absent in this data)
                  hl|<house no>|<locality word>   x|<compound id: D-12 -> d12, 22/235>
                  nb|<consecutive address numbers>  (house keys use the first two numbers)
-<<<<<<< HEAD
                  hv|<house no with its first or last digit dropped>|<street word>  (the noise
                  clips house numbers: 2424 -> 424, 17177 -> 1717; crossed so that only an exact
                  number on one side meets a clipped variant on the other)
                  sl|<street word>|<locality word>  (records whose house number was dropped)
-=======
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
                  s|<street word>  l|<locality word>  n|<address number>
   char block     character 3-grams of the core name (typos, scrambles, glued words)
 
@@ -40,16 +37,10 @@ import polars as pl
 import scipy.sparse as sp
 from numba import njit, prange
 
-<<<<<<< HEAD
 NS_CODES = {"w": 0, "b": 1, "c": 2, "h": 3, "hn": 4, "s": 5, "l": 6, "n": 7, "g": 8, "x": 9, "hl": 10, "nb": 11,
             "hv": 12, "sl": 13}
 NAME_NS = {"w": 1.0, "b": 1.0, "c": 1.5}
 ADDR_NS = {"h": 1.5, "hn": 1.5, "hl": 1.2, "x": 1.5, "nb": 1.2, "s": 1.0, "l": 0.6, "n": 0.6, "hv": 1.2, "sl": 0.8}
-=======
-NS_CODES = {"w": 0, "b": 1, "c": 2, "h": 3, "hn": 4, "s": 5, "l": 6, "n": 7, "g": 8, "x": 9, "hl": 10, "nb": 11}
-NAME_NS = {"w": 1.0, "b": 1.0, "c": 1.5}
-ADDR_NS = {"h": 1.5, "hn": 1.5, "hl": 1.2, "x": 1.5, "nb": 1.2, "s": 1.0, "l": 0.6, "n": 0.6}
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 BLOCK_WEIGHTS = {"name": 0.40, "addr": 0.45, "char": 0.15}
 STREET_TYPE_TOKENS = {
     "st", "rd", "ave", "dr", "ln", "blvd", "ct", "cir", "pl", "ter", "pkwy", "hwy", "way", "trl",
@@ -127,7 +118,6 @@ def _word_features_chunk(df: pl.DataFrame, offset: int) -> pl.DataFrame:
     return pl.concat(parts)
 
 
-<<<<<<< HEAD
 def _retrieval_chunk(df: pl.DataFrame, offset: int, side: int) -> pl.DataFrame:
     """
     Retrieval-only address keys (need to know the side):
@@ -197,40 +187,6 @@ def build_tfidf(f1: pl.DataFrame, f2: pl.DataFrame, n1: int, n2: int, ns_weights
     can ever produce a match), dropping features with df > max_df. Rows are
     L2-normalised unless normalize=False (raw idf weights, for containment features).
     """
-=======
-def word_features(df: pl.DataFrame, chunk: int = 400_000) -> pl.DataFrame:
-    """Long frame (row:u32, h:u64, ns:u8) of hashed key features."""
-    return pl.concat([_word_features_chunk(df.slice(s, chunk), s) for s in range(0, len(df), chunk)])
-
-
-def _char_features_chunk(df: pl.DataFrame, offset: int, n: int) -> pl.DataFrame:
-    s = df.select((pl.int_range(0, pl.len(), dtype=pl.UInt32) + offset).alias("row"),
-                  (pl.lit(" ") + pl.col("n_core") + pl.lit(" ")).alias("s"))
-    s = s.filter(pl.col("s").str.len_chars() > n + 1)
-    s = s.with_columns(pl.int_ranges(0, pl.col("s").str.len_chars() - n + 1).alias("off")).explode("off")
-    s = s.with_columns(pl.col("s").str.slice(pl.col("off"), n).alias("g"))
-    s = s.filter(~pl.col("g").str.contains("^ *$"))
-    return s.select("row", pl.col("g").hash(seed=29).alias("h"),
-                    pl.lit(NS_CODES["g"], dtype=pl.UInt8).alias("ns")).unique(["row", "h"])
-
-
-def char_features(df: pl.DataFrame, n: int = 3, chunk: int = 400_000) -> pl.DataFrame:
-    return pl.concat([_char_features_chunk(df.slice(s, chunk), s, n) for s in range(0, len(df), chunk)])
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TF-IDF matrices
-# ─────────────────────────────────────────────────────────────────────────────
-
-def build_tfidf(f1: pl.DataFrame, f2: pl.DataFrame, n1: int, n2: int, ns_weights: Dict[str, float],
-                max_df: int, min_df: int = 2, normalize: bool = True
-                ) -> Tuple[sp.csr_matrix, sp.csr_matrix]:
-    """
-    TF-IDF rows for both sides over the features that occur on both sides (only those
-    can ever produce a match), dropping features with df > max_df. Rows are
-    L2-normalised unless normalize=False (raw idf weights, for containment features).
-    """
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     if len(f1) == 0 or len(f2) == 0:
         return sp.csr_matrix((n1, 1), dtype=np.float32), sp.csr_matrix((n2, 1), dtype=np.float32)
     h1 = f1["h"].to_numpy()
@@ -455,11 +411,7 @@ def generate_candidates(s1: pl.DataFrame, s23: pl.DataFrame, k_comb: int = 25, k
         if verbose:
             print(f"    [{time.time()-t0:5.0f}s] {msg}", flush=True)
 
-<<<<<<< HEAD
     fw1, fw2 = word_features(s1, side=1), word_features(s23, side=2)
-=======
-    fw1, fw2 = word_features(s1), word_features(s23)
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     name_ns = [NS_CODES[k] for k in NAME_NS]
     addr_ns = [NS_CODES[k] for k in ADDR_NS]
     N1, N2 = build_tfidf(fw1.filter(pl.col("ns").is_in(name_ns)), fw2.filter(pl.col("ns").is_in(name_ns)),

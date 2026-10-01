@@ -23,7 +23,6 @@ work/
 
 # Submission archive (built from output/ + code/ + Documentation_template.md)
 *_submission.zip
-<<<<<<< HEAD
-=======
-temp/
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
+
+# Challenge dataset archive (download it from the portal; never commit it)
+6ab10eb3b23ba_student_resource.zip

@@ -2,15 +2,20 @@
 """
 Business Entity Resolution - command line entry point.
 
-  python code/business_entity_resolution/src/run.py --mode all \
-      --train-dir dataset/train --test-dir dataset/test --output-dir output
+  Reproduce the submission with the shipped model (see README, recipe A):
+    python code/business_entity_resolution/src/run.py --mode prepare --train-dir $DATA/dataset/train \
+        --test-dir $DATA/dataset/test --work-dir work --model-dir code/business_entity_resolution/model
+    python code/business_entity_resolution/src/run.py --mode predict --train-dir $DATA/dataset/train \
+        --test-dir $DATA/dataset/test --work-dir work --model-dir code/business_entity_resolution/model \
+        --output-dir output_repro
+  Retrain (recipe B): always pass a new --model-dir (the default is the shipped model/).
 
 Modes
   all       translit -> normalize -> block -> train -> predict -> validate
   prepare   translit + normalize + block for train and test (features are computed on the fly)
   train     stage 1 / stage 2 models + threshold tuning (needs `prepare`)
-  predict   score the test set and write output/*.tsv (needs `train`)
-  validate  run the official validator on output/
+  predict   score the test set and write <output-dir>/*.tsv (needs `prepare` and a trained model)
+  validate  run the official validator on <output-dir>
 """
 import argparse
 import json
@@ -35,8 +40,8 @@ def run_validator(output_dir: str, test_dir: str, validator: str = None) -> int:
     ]
     path = next((os.path.abspath(p) for p in candidates if p and os.path.isfile(p)), None)
     if path is None:
-        print("validate_submission.py not found - skipping validation (pass --validator)")
-        return 0
+        print("validate_submission.py not found - validation NOT run (pass --validator)")
+        return None
     print(f"\n-- official validator: {path}")
     return subprocess.run([sys.executable, path,
                            "--matching", os.path.join(output_dir, "matching_results.tsv"),
@@ -55,7 +60,6 @@ def main():
                     help="where models, thresholds and the transliteration dictionary are stored")
     ap.add_argument("--validator", default=None, help="path to utils/validate_submission.py")
     ap.add_argument("--n-jobs", type=int, default=pipeline.DEFAULT_CONFIG["n_jobs"])
-<<<<<<< HEAD
     ap.add_argument("--reuse-stage1", action="store_true",
                     help="train / predict: keep the stage-1 model and reuse saved stage-1 scores of unchanged candidates")
     ap.add_argument("--force", action="store_true", help="recompute cached blocking")
@@ -75,13 +79,6 @@ def main():
     for key in ("stage1_sample", "stage2_sample"):
         if getattr(args, key) is not None:
             cfg[key] = getattr(args, key)
-=======
-    ap.add_argument("--reuse-stage1", action="store_true", help="train: keep the stage-1 model and p1")
-    ap.add_argument("--force", action="store_true", help="recompute cached blocking")
-    args = ap.parse_args()
-
-    cfg = dict(pipeline.DEFAULT_CONFIG, n_jobs=args.n_jobs)
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     ws = pipeline.Workspace(args.work_dir, os.path.abspath(args.model_dir))
     t0 = time.time()
 
@@ -98,7 +95,7 @@ def main():
         pipeline.stage_predict(ws, args.output_dir, cfg)
     if args.mode in ("all", "predict", "validate"):
         rc = run_validator(args.output_dir, args.test_dir, args.validator)
-        print("validator:", "PASS" if rc == 0 else f"FAIL (exit {rc})")
+        print("validator:", "not run" if rc is None else "PASS" if rc == 0 else f"FAIL (exit {rc})")
     print(f"total time {time.time() - t0:.0f}s")
 
 

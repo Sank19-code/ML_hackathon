@@ -18,8 +18,9 @@ Pair features are computed on the fly in chunks (about 11 microseconds per pair)
 than stored: the full feature matrices would need ~16 GB of disk. Everything runs country
 by country (matches never cross countries in the ground truth) with integer row keys, so
 memory stays bounded on a 16 GB machine. Countries are an open set: a country without
-training labels (France in the test set) uses the same country-agnostic model and a
-stricter default decision rule.
+training labels (France in the test set) uses the same country-agnostic model with the pooled
+calibration softened by a temperature (1.5) and no missed-match term, settings chosen on
+leave-one-country-out rehearsals.
 """
 import gc
 import json
@@ -43,42 +44,30 @@ except ImportError:
 
 DEFAULT_CONFIG = {
     "n_jobs": 14,
-<<<<<<< HEAD
     "block": {"k_comb": 25, "k_name": 10, "k_addr": 20, "max_candidates": 50,
               "max_df_word": 5000, "max_df_char": 2000},
     # countries whose Source 2/3 records are partly in a non-Latin script (transliterated names overlap
     # less lexically, renamed businesses rank just below the top 25) get a deeper combined list; decided
     # from the data of each country, never from its name (+0.26 recall points where it applies)
     "deep_block": {"min_native_share": 0.05, "k_comb": 40, "max_candidates": 60},
-=======
-    "block": {"k_comb": 25, "k_name": 10, "k_addr": 15, "max_candidates": 50,
-              "max_df_word": 5000, "max_df_char": 2000},
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
-    "stage1_sample": 0.12,          # fraction of training Source 1 entities used to fit stage 1
-    "stage2_sample": 0.12,          # fraction used to fit stage 2
+    "stage1_sample": 0.20,          # fraction of training Source 1 entities used to fit stage 1 (shipped model)
+    "stage2_sample": 0.20,          # fraction used to fit stage 2 (shipped model)
     "stage1_rounds": 700,
     "stage2_rounds": 500,
     "unseen_country_margin": 0.05,  # stricter default decision for countries without labels
-<<<<<<< HEAD
-    # countries without labels (design section 4.9): pooled calibration softened by a temperature and the
+    # countries without labels: pooled calibration softened by a temperature and the
     # blocking-miss term chosen on leave-one-country-out runs; optional logit offsets per pre-registered
-    # pair shape, set only from leaderboard probes (section 4.10)
+    # pair shape (an unused hook: empty in the submitted model; no leaderboard feedback is used)
     # temperature 1.5 / lam 0 is the only setting that improved BOTH leave-one-country-out directions
     # (US model on India 0.96774 -> 0.96807, India model on US 0.97766 -> 0.97769)
     "unlabelled": {"temperature": 1.5, "lam": 0.0, "bucket_offsets": {}},
 }
 EXACT_LAMS = (0.0, 0.05, 0.1, 0.2, 0.4)
-=======
-}
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 CHUNK = 1_500_000
 CONTEXT_FEATURES = ["s1_name_dup", "s1_name_in_s23", "s1_addr_dup", "b_name_dup", "b_name_in_s1", "b_addr_dup"]
 STAGE1_NAMES = features.FEATURE_NAMES + CONTEXT_FEATURES
 STAGE2_NAMES = STAGE1_NAMES + decide.GROUP_FEATURES
-<<<<<<< HEAD
 CC_COL = STAGE1_NAMES.index("cc_jacc")
-=======
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 
 
 class Workspace:
@@ -101,19 +90,15 @@ class Workspace:
     def scores(self, split, country):
         return os.path.join(self.work, "scores", f"{split}_{_safe(country)}.parquet")
 
-<<<<<<< HEAD
     def tmp(self, name):
         os.makedirs(os.path.join(self.work, "tmp"), exist_ok=True)
         return os.path.join(self.work, "tmp", name)
 
-=======
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     @property
     def translit(self):
         return os.path.join(self.model, "translit.json")
 
 
-<<<<<<< HEAD
 def _remove(paths):
     for p in paths:
         try:
@@ -122,8 +107,6 @@ def _remove(paths):
             pass
 
 
-=======
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 def _safe(country: str) -> str:
     return "".join(c if c.isalnum() else "_" for c in (country or "NA"))
 
@@ -181,7 +164,6 @@ def load_country(ws: Workspace, split: str, country: str, columns=None) -> Tuple
     return s1, s23
 
 
-<<<<<<< HEAD
 def block_params(cfg: Dict, native_share: float) -> Dict:
     """Blocking depth from a statistic of the country's own records (open set: no country names)."""
     params = dict(cfg["block"])
@@ -201,15 +183,6 @@ def stage_block(ws: Workspace, split: str, cfg: Dict, force: bool = False):
             continue
         _log(f"blocking {split}/{country}")
         cols = ["entity_id", "country", "is_native"] + blocking.BLOCK_COLUMNS
-=======
-def stage_block(ws: Workspace, split: str, cfg: Dict, force: bool = False):
-    for country in countries(ws, split):
-        path = ws.cands(split, country)
-        if os.path.isfile(path) and not force:
-            continue
-        _log(f"blocking {split}/{country}")
-        cols = ["entity_id", "country"] + blocking.BLOCK_COLUMNS
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
         s1, s23 = load_country(ws, split, country, cols)
         s1.select("entity_id").write_parquet(ws.ids(split, country, "s1"))
         s23.select("entity_id").write_parquet(ws.ids(split, country, "s23"))
@@ -218,13 +191,9 @@ def stage_block(ws: Workspace, split: str, cfg: Dict, force: bool = False):
                                          "cos_addr": pl.Float32, "cos_char": pl.Float32,
                                          "cheap": pl.Float32, "rank": pl.UInt16})
         else:
-<<<<<<< HEAD
             params = block_params(cfg, float(s23["is_native"].mean() or 0.0))
             _log(f"  blocking parameters {params}")
             cands = blocking.generate_candidates(s1, s23.drop("is_native"), **params)
-=======
-            cands = blocking.generate_candidates(s1, s23, **cfg["block"])
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
         cands = cands.with_columns(pl.len().over("i1").cast(pl.UInt16).alias("n_cands"))
         cands.write_parquet(path)
         del s1, s23, cands
@@ -316,15 +285,10 @@ class CountryData:
         fz = self.fz
         return 0.5 * (blocking.pair_stats(fz.Bn, fz.Bn, J, K)[:, 0] + blocking.pair_stats(fz.Ba, fz.Ba, J, K)[:, 0])
 
-<<<<<<< HEAD
     def group(self, s: int, e: int, p1: np.ndarray, jagg: pl.DataFrame, cc: Optional[np.ndarray] = None) -> np.ndarray:
         I, J = self.cands["i1"][s:e], self.cands["j"][s:e]
         if cc is None:
             cc = self.fz.content_core(I.to_numpy(), J.to_numpy())["cc_jacc"]
-=======
-    def group(self, s: int, e: int, p1: np.ndarray, jagg: pl.DataFrame) -> np.ndarray:
-        I, J = self.cands["i1"][s:e], self.cands["j"][s:e]
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
         ha, hb = self.fz.s1["a_house"].gather(I), self.fz.s23["a_house"].gather(J)
         nb = self.fz.s23["a_nums"].gather(J).str.split(" ")
         delta = hb.cast(pl.Int64, strict=False) - ha.cast(pl.Int64, strict=False)
@@ -332,12 +296,8 @@ class CountryData:
                               "cos_addr": self.cands["cos_addr"][s:e], "cos_name": self.cands["cos_name"][s:e],
                               "hb": hb, "sib": delta.is_in(features.SIBLING_OFFSETS).fill_null(False).cast(pl.Int32),
                               "has_ha": pl.DataFrame({"nb": nb, "ha": ha}).select(
-<<<<<<< HEAD
                                   pl.col("nb").list.contains(pl.col("ha")) & (pl.col("ha") != ""))["nb"],
                               "cc": cc})
-=======
-                                  pl.col("nb").list.contains(pl.col("ha")) & (pl.col("ha") != ""))["nb"]})
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
         return decide.group_features_chunk(chunk, jagg, self.support_sim)
 
 
@@ -379,16 +339,11 @@ def score_stage1(cd: CountryData, ens1: model.FoldEnsemble, oof: bool) -> np.nda
 
 
 def score_stage2(cd: CountryData, ens2: model.FoldEnsemble, p1: np.ndarray, oof: bool,
-<<<<<<< HEAD
                  sample_mask: Optional[np.ndarray] = None, sink=None):
     """
     Stage-2 probabilities for all pairs; optionally also the stage-2 inputs of sampled rows, either
     returned as one matrix or handed chunk by chunk to `sink` (e.g. a writer into a disk memory map).
     """
-=======
-                 sample_mask: Optional[np.ndarray] = None):
-    """Stage-2 probabilities for all pairs; optionally also returns the stage-2 inputs of sampled rows."""
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     jagg = decide.j_aggregates(pl.DataFrame({"j": cd.cands["j"], "p1": p1, "cos_addr": cd.cands["cos_addr"],
                                              "cos_name": cd.cands["cos_name"]}))
     p = np.empty(len(cd), dtype=np.float32) if ens2 is not None else None
@@ -401,7 +356,6 @@ def score_stage2(cd: CountryData, ens2: model.FoldEnsemble, p1: np.ndarray, oof:
             rows = rows[sample_mask[s:e]]
             if len(rows) == 0:
                 continue
-<<<<<<< HEAD
         if need_all:   # all rows featurised anyway: reuse the content-core column for the group features
             Xb = cd.base(rows)
             G = cd.group(s, e, p1, jagg, cc=Xb[:, CC_COL])
@@ -416,13 +370,6 @@ def score_stage2(cd: CountryData, ens2: model.FoldEnsemble, p1: np.ndarray, oof:
                 sink(block)
             else:
                 samples.append(block)
-=======
-        G = cd.group(s, e, p1, jagg)
-        X = np.hstack([cd.base(rows), G[rows - s]])
-        if sample_mask is not None:
-            keep = sample_mask[rows]
-            samples.append(X[keep] if need_all else X)
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
         if need_all:
             p[s:e] = _predict(ens2, X, cd.fold[s:e] if oof else None, STAGE2_NAMES)
     _log(f"  stage-2 pass {cd.split}/{cd.country}: {time.time()-t0:.0f}s")
@@ -433,7 +380,6 @@ def score_stage2(cd: CountryData, ens2: model.FoldEnsemble, p1: np.ndarray, oof:
 # Stage: training
 # ─────────────────────────────────────────────────────────────────────────────
 
-<<<<<<< HEAD
 def fit_crossfit(X, y: np.ndarray, fold: np.ndarray, names: List[str], rounds: int,
                  params=None) -> model.FoldEnsemble:
     """
@@ -442,13 +388,6 @@ def fit_crossfit(X, y: np.ndarray, fold: np.ndarray, names: List[str], rounds: i
     """
     ens = model.FoldEnsemble(names, params, rounds)
     full = ens.dataset(X, y)
-=======
-def fit_crossfit(X: np.ndarray, y: np.ndarray, fold: np.ndarray, names: List[str], rounds: int,
-                 params=None) -> model.FoldEnsemble:
-    """Model k is trained on rows whose fold != k, so it scores fold k out of sample."""
-    ens = model.FoldEnsemble(names, params, rounds)
-    full = ens.dataset(X, y)  # binned once; each fold model trains on a subset of it
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     del X
     gc.collect()
     for k in (0, 1):
@@ -460,31 +399,20 @@ def fit_crossfit(X: np.ndarray, y: np.ndarray, fold: np.ndarray, names: List[str
 
 def stage_train(ws: Workspace, train_dir: str, cfg: Dict, reuse_stage1: bool = False) -> Dict:
     gt = gt_long(os.path.join(train_dir, "train_ground_truth.tsv"))
-<<<<<<< HEAD
     cs = cfg.get("train_countries") or countries(ws, "train")
-=======
-    cs = countries(ws, "train")
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     frac1 = int(cfg["stage1_sample"] * 10_000)
     frac2 = int(cfg["stage2_sample"] * 10_000)
 
     # ── stage 1: sample, fit, out-of-fold scores ──
-<<<<<<< HEAD
     # sampled rows are featurised chunk by chunk into per-country float32 .npy memory maps on disk and
     # binned by LightGBM straight from those blocks (no in-RAM stacking: 2-3x larger samples fit in 16 GB)
     p1_path = os.path.join(ws.model, "stage1.pkl")
     if not (reuse_stage1 and os.path.isfile(p1_path)):
         Xs, ys, fs, paths = [], [], [], []
-=======
-    p1_path = os.path.join(ws.model, "stage1.pkl")
-    if not (reuse_stage1 and os.path.isfile(p1_path)):
-        Xs, ys, fs = [], [], []
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
         for c in cs:
             cd = CountryData(ws, "train", c, gt)
             rows = np.where(cd.h < frac1)[0]
             _log(f"train/{c}: {len(cd):,} pairs, {int(cd.y.sum()):,} positive; stage-1 sample {len(rows):,}")
-<<<<<<< HEAD
             path = ws.tmp(f"stage1_X_{_safe(c)}.npy")
             mm = np.lib.format.open_memmap(path, mode="w+", dtype=np.float32, shape=(len(rows), len(STAGE1_NAMES)))
             for a in range(0, len(rows), 1_000_000):
@@ -492,33 +420,20 @@ def stage_train(ws: Workspace, train_dir: str, cfg: Dict, reuse_stage1: bool = F
             mm.flush()
             Xs.append(mm)
             paths.append(path)
-=======
-            Xs.append(cd.base(rows))
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
             ys.append(cd.y[rows])
             fs.append(cd.fold[rows])
             del cd
             gc.collect()
-<<<<<<< HEAD
         ens1 = fit_crossfit(Xs, np.concatenate(ys), np.concatenate(fs), STAGE1_NAMES, cfg["stage1_rounds"])
         del Xs, mm
         gc.collect()
         _remove(paths)
-=======
-        ens1 = fit_crossfit(np.vstack(Xs), np.concatenate(ys), np.concatenate(fs), STAGE1_NAMES,
-                            cfg["stage1_rounds"])
-        del Xs
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
         ens1.save(p1_path)
         _log("stage 1 importance: " + ", ".join(f"{n}={v:.3f}" for n, v in ens1.importance(15)))
     ens1 = model.FoldEnsemble.load(p1_path)
 
     # ── stage 1 scores + stage 2 sample (one featurisation pass per country) ──
-<<<<<<< HEAD
     p1s, X2, y2, f2, paths2 = {}, [], [], [], []
-=======
-    p1s, X2, y2, f2 = {}, [], [], []
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     for c in cs:
         cd = CountryData(ws, "train", c, gt)
         p1 = None
@@ -531,7 +446,6 @@ def stage_train(ws: Workspace, train_dir: str, cfg: Dict, reuse_stage1: bool = F
             pl.DataFrame({"p1": p1}).write_parquet(ws.scores("train", c + "_p1"))
         p1s[c] = p1
         mask = cd.h < frac2
-<<<<<<< HEAD
         path = ws.tmp(f"stage2_X_{_safe(c)}.npy")
         mm = np.lib.format.open_memmap(path, mode="w+", dtype=np.float32,
                                        shape=(int(mask.sum()), len(STAGE2_NAMES)))
@@ -554,17 +468,6 @@ def stage_train(ws: Workspace, train_dir: str, cfg: Dict, reuse_stage1: bool = F
     del X2
     gc.collect()
     _remove(paths2)
-=======
-        _, Xc = score_stage2(cd, None, p1, oof=True, sample_mask=mask)
-        X2.append(Xc)
-        y2.append(cd.y[mask])
-        f2.append(cd.fold[mask])
-        del cd
-        gc.collect()
-    X2, y2, f2 = np.vstack(X2), np.concatenate(y2), np.concatenate(f2)
-    ens2 = fit_crossfit(X2, y2, f2, STAGE2_NAMES, cfg["stage2_rounds"])
-    del X2
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     ens2.save(os.path.join(ws.model, "stage2.pkl"))
     _log("stage 2 importance: " + ", ".join(f"{n}={v:.3f}" for n, v in ens2.importance(15)))
 
@@ -600,7 +503,6 @@ def _country_eval_frames(ws: Workspace, country: str, t: pl.DataFrame, gt: pl.Da
     return ent, g, sc
 
 
-<<<<<<< HEAD
 def _with_y(best: pl.DataFrame, g: pl.DataFrame) -> pl.DataFrame:
     return best.join(g.select("s1", "eid").unique().with_columns(pl.lit(1, dtype=pl.Int8).alias("y")),
                      on=["s1", "eid"], how="left").with_columns(pl.col("y").fill_null(0))
@@ -623,15 +525,6 @@ def evaluate_and_tune(ws: Workspace, tables: Dict[str, pl.DataFrame], gt: pl.Dat
     for c, t in tables.items():
         ent, g, sc = _country_eval_frames(ws, c, t, gt, prob)
         best = _with_y(decide.one_to_one(sc.filter(pl.col("p") >= 1e-3)), g)
-=======
-def evaluate_and_tune(ws: Workspace, tables: Dict[str, pl.DataFrame], gt: pl.DataFrame, cfg: Dict,
-                      prob: str = "p") -> Dict:
-    final_th, final_ef, summary = {}, {}, {}
-    per_method = {"thr": {0: [], 1: []}, "ef": {0: [], 1: []}}
-    for c, t in tables.items():
-        ent, g, sc = _country_eval_frames(ws, c, t, gt, prob)
-        best = decide.one_to_one(sc)
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
         for k in (0, 1):
             tune_e = ent.filter(pl.col("fold") == k).select("s1")
             eval_e = ent.filter(pl.col("fold") != k).select("s1")
@@ -646,7 +539,6 @@ def evaluate_and_tune(ws: Workspace, tables: Dict[str, pl.DataFrame], gt: pl.Dat
             r = metrics.report(eval_e, g_e, decide.expected_f_select(b_e, **ef), sc_e,
                                title=f"{c} expected-F tuned on fold {k} -> fold {1-k} {ef}")
             per_method["ef"][k].append((len(eval_e), r))
-<<<<<<< HEAD
             cal = decide.fit_isotonic(b_t["p"].to_numpy(), b_t["y"].to_numpy())
             lam, _ = _tune_exact(b_t, tune_e, g_t, cal)
             be = b_e.with_columns(pl.Series("q", decide.apply_calibration(b_e["p"].to_numpy(), cal)))
@@ -658,10 +550,6 @@ def evaluate_and_tune(ws: Workspace, tables: Dict[str, pl.DataFrame], gt: pl.Dat
         final_cal[c] = decide.fit_isotonic(best["p"].to_numpy(), best["y"].to_numpy())
         final_lam[c], _ = _tune_exact(best, ent.select("s1"), g, final_cal[c])
         pooled.append(best.select("p", "y"))
-=======
-        final_th[c], _ = decide.tune_thresholds(best, ent.select("s1"), g)
-        final_ef[c], _ = decide.tune_expected_f(best, ent.select("s1"), g)
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     heldout = {}
     for meth, folds in per_method.items():
         vals = []
@@ -684,7 +572,6 @@ def evaluate_and_tune(ws: Workspace, tables: Dict[str, pl.DataFrame], gt: pl.Dat
     default_ef = {"gamma": max(e["gamma"] for e in final_ef.values()),
                   "missed": max(e["missed"] for e in final_ef.values()),
                   "floor": min(0.95, max(e["floor"] for e in final_ef.values()) + margin)}
-<<<<<<< HEAD
     pooled = pl.concat(pooled)
     final_cal["__pooled__"] = decide.fit_isotonic(pooled["p"].to_numpy(), pooled["y"].to_numpy())
     un = dict(cfg.get("unlabelled") or {})
@@ -694,10 +581,6 @@ def evaluate_and_tune(ws: Workspace, tables: Dict[str, pl.DataFrame], gt: pl.Dat
     rules = {"method": method, "thresholds": final_th, "default": default_th,
              "expected_f": final_ef, "default_expected_f": default_ef,
              "calibration": final_cal, "exact_lam": final_lam, "unlabelled": unlabelled}
-=======
-    rules = {"method": method, "thresholds": final_th, "default": default_th,
-             "expected_f": final_ef, "default_expected_f": default_ef}
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     with open(os.path.join(ws.model, "thresholds.json"), "w") as f:
         json.dump(rules, f, indent=1)
     _log(f"decision method: {method} (held-out {heldout}); thresholds {final_th}; expected-F {final_ef}")
@@ -705,7 +588,6 @@ def evaluate_and_tune(ws: Workspace, tables: Dict[str, pl.DataFrame], gt: pl.Dat
     return summary
 
 
-<<<<<<< HEAD
 def decide_country(best: pl.DataFrame, country: str, rules: Dict,
                    buckets: Optional[pl.Series] = None) -> pl.DataFrame:
     """
@@ -722,10 +604,6 @@ def decide_country(best: pl.DataFrame, country: str, rules: Dict,
             q = decide.apply_bucket_offsets(q, buckets, un["bucket_offsets"])
         lam = rules["exact_lam"][country] if labelled else un.get("lam", 0.0)
         return decide.exact_f_select(best.with_columns(pl.Series("q", q)), lam).drop("q")
-=======
-def decide_country(best: pl.DataFrame, country: str, rules: Dict) -> pl.DataFrame:
-    """Apply the saved decision rule of a country (or the stricter default for unseen countries)."""
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
     if rules["method"] == "ef":
         params = rules["expected_f"].get(country, rules["default_expected_f"])
         return decide.expected_f_select(best, **params)
@@ -743,7 +621,6 @@ def stage_predict(ws: Workspace, output_dir: str, cfg: Dict):
     with open(os.path.join(ws.model, "thresholds.json")) as f:
         rules = json.load(f)
     cand_parts, pred_parts = [], []
-<<<<<<< HEAD
     for c in cfg.get("predict_countries") or countries(ws, "test"):
         cd = CountryData(ws, "test", c)
         _log(f"test/{c}: {len(cd):,} pairs")
@@ -752,12 +629,6 @@ def stage_predict(ws: Workspace, output_dir: str, cfg: Dict):
             _log(f"  reusing saved stage-1 scores for test/{c}")
             p, _ = score_stage2(cd, ens2, p1, oof=False)
         elif len(cd):
-=======
-    for c in countries(ws, "test"):
-        cd = CountryData(ws, "test", c)
-        _log(f"test/{c}: {len(cd):,} pairs")
-        if len(cd):
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
             p1 = score_stage1(cd, ens1, oof=False)
             p, _ = score_stage2(cd, ens2, p1, oof=False)
         else:
@@ -767,11 +638,11 @@ def stage_predict(ws: Workspace, output_dir: str, cfg: Dict):
         t.write_parquet(ws.scores("test", c))
         t = t.with_columns(cd.s1ids.gather(t["i1"]).alias("s1"), cd.s23ids.gather(t["j"]).alias("eid"),
                            pl.when(pl.col("is_s2") == 1).then(pl.lit("S2")).otherwise(pl.lit("S3")).alias("src"))
-<<<<<<< HEAD
         labelled = c in rules["thresholds"]
         if not labelled:
             _log(f"  {c}: no training labels -> unlabelled-country decision path")
-        best = decide.one_to_one(t.select("s1", "eid", "src", "p", "i1", "j"))
+        # same candidate set as the decision tuning in evaluate_and_tune (pairs with p >= 1e-3)
+        best = decide.one_to_one(t.filter(pl.col("p") >= 1e-3).select("s1", "eid", "src", "p", "i1", "j"))
         buckets = None
         if not labelled and rules.get("unlabelled", {}).get("bucket_offsets") and len(best):
             buckets = decide.shape_buckets(cd.fz.s1["a_house"].gather(best["i1"]), cd.fz.s23["a_house"].gather(best["j"]),
@@ -779,12 +650,6 @@ def stage_predict(ws: Workspace, output_dir: str, cfg: Dict):
                                            features.SIBLING_OFFSETS)
             _log(f"  {c}: shape buckets {dict(zip(*np.unique(buckets.to_numpy(), return_counts=True)))}")
         pred = decide_country(best, c, rules, buckets).select("s1", "eid", "p")
-=======
-        if c not in rules["thresholds"]:
-            _log(f"  {c}: no training labels -> stricter default decision rule")
-        best = decide.one_to_one(t.select("s1", "eid", "src", "p"))
-        pred = decide_country(best, c, rules).select("s1", "eid", "p")
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
         _log(f"  {c}: {len(pred):,} matches for {pred['s1'].n_unique():,} of {len(cd.s1ids):,} entities")
         pred_parts.append(pred)
         cand_parts.append(t.select("s1", "eid", "rank"))
@@ -793,7 +658,6 @@ def stage_predict(ws: Workspace, output_dir: str, cfg: Dict):
     write_outputs(ws, output_dir, pl.concat(cand_parts), pl.concat(pred_parts))
 
 
-<<<<<<< HEAD
 def _saved_test_p1(ws: Workspace, cd: CountryData) -> Optional[np.ndarray]:
     """Stage-1 test scores from an earlier predict run, if they belong to exactly these candidates."""
     path = ws.scores("test", cd.country)
@@ -805,8 +669,6 @@ def _saved_test_p1(ws: Workspace, cd: CountryData) -> Optional[np.ndarray]:
     return saved["p1"].to_numpy()
 
 
-=======
->>>>>>> c74d74966aa5790f9e27f6c02d6e31673ab29d10
 def write_outputs(ws: Workspace, output_dir: str, cands: pl.DataFrame, pred: pl.DataFrame):
     os.makedirs(output_dir, exist_ok=True)
     s1 = pl.read_parquet(ws.norm("test", 1), columns=["entity_id"]).rename({"entity_id": "s1"})
